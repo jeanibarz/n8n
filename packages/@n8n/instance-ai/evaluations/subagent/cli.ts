@@ -2,18 +2,20 @@
 // ---------------------------------------------------------------------------
 // CLI for isolated sub-agent evaluation
 //
-// Runs builder sub-agents directly (no n8n instance required) and evaluates
-// the resulting workflows with binary checks.
-//
 // Usage:
 //   pnpm eval:subagent --verbose
 //   pnpm eval:subagent --filter webhook --verbose
-//   pnpm eval:subagent --timeout 180000
+//   pnpm eval:subagent --prompt "Build a webhook workflow" --subagent builder
+//   pnpm eval:subagent --dataset my-dataset --experiment my-exp --verbose
 // ---------------------------------------------------------------------------
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, basename } from 'node:path';
 
+import { evaluate } from 'langsmith/evaluation';
+import { Client } from 'langsmith/client';
+
+import { createFeedbackExtractor, mapExampleToTestCase } from './langsmith';
 import { runSubAgent } from './runner';
 import type { SubAgentTestCase, SubAgentRunnerConfig, SubAgentResult } from './types';
 
@@ -27,6 +29,11 @@ interface CliArgs {
 	timeoutMs: number;
 	maxSteps: number;
 	modelId: string;
+	subagent: string;
+	prompt?: string;
+	dataset?: string;
+	experiment?: string;
+	concurrency: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -35,6 +42,8 @@ function parseArgs(argv: string[]): CliArgs {
 		timeoutMs: 120_000,
 		maxSteps: 20,
 		modelId: process.env.N8N_INSTANCE_AI_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-20250514',
+		subagent: 'builder',
+		concurrency: 1,
 	};
 
 	for (let i = 0; i < argv.length; i++) {
@@ -56,6 +65,21 @@ function parseArgs(argv: string[]): CliArgs {
 			case '--model':
 				args.modelId = argv[++i];
 				break;
+			case '--subagent':
+				args.subagent = argv[++i];
+				break;
+			case '--prompt':
+				args.prompt = argv[++i];
+				break;
+			case '--dataset':
+				args.dataset = argv[++i];
+				break;
+			case '--experiment':
+				args.experiment = argv[++i];
+				break;
+			case '--concurrency':
+				args.concurrency = Number(argv[++i]);
+				break;
 			default:
 				break;
 		}
@@ -65,12 +89,12 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 // ---------------------------------------------------------------------------
-// Dataset loading
+// Dataset loading (local JSON files)
 // ---------------------------------------------------------------------------
 
 const DATA_DIR = join(__dirname, '..', 'data', 'subagent');
 
-function loadTestCases(filter?: string): SubAgentTestCase[] {
+function loadLocalTestCases(filter?: string, subagent?: string): SubAgentTestCase[] {
 	let files: string[];
 	try {
 		files = readdirSync(DATA_DIR).filter((f) => f.endsWith('.json'));
@@ -88,12 +112,14 @@ function loadTestCases(filter?: string): SubAgentTestCase[] {
 		const parsed = JSON.parse(raw) as {
 			id?: string;
 			prompt: string;
+			subagent?: string;
 			tools?: string[];
 			maxSteps?: number;
 		};
 		return {
 			id: parsed.id ?? basename(file, '.json'),
 			prompt: parsed.prompt,
+			subagent: parsed.subagent ?? subagent,
 			tools: parsed.tools,
 			maxSteps: parsed.maxSteps,
 		};
@@ -130,7 +156,6 @@ function printResult(result: SubAgentResult, verbose: boolean): void {
 	}
 
 	if (verbose) {
-		// Show individual check results
 		const checks = feedback.filter((f) => f.evaluator === 'binary-checks' && f.kind === 'metric');
 		for (const check of checks) {
 			const icon = check.score === 1 ? '  \u2713' : '  \u2717';
@@ -138,12 +163,10 @@ function printResult(result: SubAgentResult, verbose: boolean): void {
 			console.log(`${icon} ${check.metric}${comment}`);
 		}
 
-		// Show workflow
 		if (result.capturedWorkflows.length > 0) {
 			console.log('  Workflow: ', result.capturedWorkflows[0].json);
 		}
 
-		// Show agent text (truncated)
 		if (result.text) {
 			console.log(`  Agent: ${truncate(result.text, 300)}`);
 		}
@@ -151,32 +174,101 @@ function printResult(result: SubAgentResult, verbose: boolean): void {
 	}
 }
 
+function printSummary(results: SubAgentResult[]): void {
+	const passed = results.filter((r) => !r.error && r.capturedWorkflows.length > 0).length;
+	const failed = results.length - passed;
+	const avgDuration = results.reduce((sum, r) => sum + r.durationMs, 0) / results.length;
+
+	console.log(`\n=== Summary ===`);
+	console.log(
+		`Total: ${String(results.length)}, Produced workflow: ${String(passed)}, Failed: ${String(failed)}`,
+	);
+	console.log(`Average duration: ${(avgDuration / 1000).toFixed(1)}s`);
+}
+
 // ---------------------------------------------------------------------------
-// Main
+// LangSmith mode
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
-	const args = parseArgs(process.argv.slice(2));
-	const testCases = loadTestCases(args.filter);
+async function runLangsmithMode(args: CliArgs, config: SubAgentRunnerConfig): Promise<void> {
+	const apiKey = process.env.LANGSMITH_API_KEY;
+	if (!apiKey) {
+		console.error('Error: LANGSMITH_API_KEY is required for --dataset mode');
+		process.exit(1);
+	}
+
+	const lsClient = new Client({ apiKey });
+
+	const target = async (inputs: Record<string, unknown>) => {
+		const testCase = mapExampleToTestCase(inputs);
+		if (!testCase.subagent) testCase.subagent = args.subagent;
+		const result = await runSubAgent(testCase, config);
+
+		return {
+			prompt: testCase.prompt,
+			subagent: testCase.subagent ?? 'builder',
+			text: result.text,
+			workflow: result.capturedWorkflows[0]?.json ?? null,
+			feedback: result.feedback,
+			durationMs: result.durationMs,
+			error: result.error,
+		};
+	};
+
+	console.log(`Running LangSmith evaluation:`);
+	console.log(`  Dataset: ${args.dataset!}`);
+	console.log(`  Experiment: ${args.experiment ?? '(auto-generated)'}`);
+	console.log(`  Sub-agent: ${args.subagent}`);
+	console.log(`  Concurrency: ${String(args.concurrency)}`);
+	console.log('');
+
+	const experimentResults = await evaluate(target, {
+		data: args.dataset!,
+		evaluators: [createFeedbackExtractor()],
+		experimentPrefix: args.experiment,
+		maxConcurrency: args.concurrency,
+		client: lsClient,
+		metadata: {
+			subagent: args.subagent,
+			modelId: config.modelId,
+			maxSteps: config.maxSteps,
+			timeoutMs: config.timeoutMs,
+		},
+	});
+
+	await lsClient.awaitPendingTraceBatches();
+
+	const experimentName =
+		'experimentName' in experimentResults
+			? String(experimentResults.experimentName)
+			: (args.experiment ?? 'unknown');
+
+	console.log(`\nExperiment complete: ${experimentName}`);
+}
+
+// ---------------------------------------------------------------------------
+// Local mode (sequential, with optional single prompt)
+// ---------------------------------------------------------------------------
+
+async function runLocalMode(args: CliArgs, config: SubAgentRunnerConfig): Promise<void> {
+	let testCases: SubAgentTestCase[];
+
+	if (args.prompt) {
+		testCases = [
+			{
+				id: 'cli-prompt',
+				prompt: args.prompt,
+				subagent: args.subagent,
+			},
+		];
+	} else {
+		testCases = loadLocalTestCases(args.filter, args.subagent);
+	}
 
 	if (testCases.length === 0) {
 		console.log('No test cases found.');
 		return;
 	}
-
-	// Verify API key is set
-	const apiKey = process.env.N8N_INSTANCE_AI_MODEL_API_KEY ?? process.env.ANTHROPIC_API_KEY;
-	if (!apiKey) {
-		console.error('Error: Set N8N_INSTANCE_AI_MODEL_API_KEY or ANTHROPIC_API_KEY');
-		process.exit(1);
-	}
-
-	const config: SubAgentRunnerConfig = {
-		modelId: args.modelId,
-		timeoutMs: args.timeoutMs,
-		maxSteps: args.maxSteps,
-		verbose: args.verbose,
-	};
 
 	console.log(
 		`Running ${String(testCases.length)} sub-agent test case(s) with model ${config.modelId}\n`,
@@ -194,17 +286,34 @@ async function main(): Promise<void> {
 		printResult(result, args.verbose);
 	}
 
-	// Summary
-	const passed = results.filter((r) => !r.error && r.capturedWorkflows.length > 0).length;
-	const failed = results.length - passed;
+	printSummary(results);
+}
 
-	console.log(`\n=== Summary ===`);
-	console.log(
-		`Total: ${String(results.length)}, Produced workflow: ${String(passed)}, Failed: ${String(failed)}`,
-	);
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
-	const avgDuration = results.reduce((sum, r) => sum + r.durationMs, 0) / results.length;
-	console.log(`Average duration: ${(avgDuration / 1000).toFixed(1)}s`);
+async function main(): Promise<void> {
+	const args = parseArgs(process.argv.slice(2));
+
+	const apiKey = process.env.N8N_INSTANCE_AI_MODEL_API_KEY ?? process.env.ANTHROPIC_API_KEY;
+	if (!apiKey) {
+		console.error('Error: Set N8N_INSTANCE_AI_MODEL_API_KEY or ANTHROPIC_API_KEY');
+		process.exit(1);
+	}
+
+	const config: SubAgentRunnerConfig = {
+		modelId: args.modelId,
+		timeoutMs: args.timeoutMs,
+		maxSteps: args.maxSteps,
+		verbose: args.verbose,
+	};
+
+	if (args.dataset) {
+		await runLangsmithMode(args, config);
+	} else {
+		await runLocalMode(args, config);
+	}
 }
 
 main().catch((error) => {

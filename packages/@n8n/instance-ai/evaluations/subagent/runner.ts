@@ -3,13 +3,13 @@
 //
 // Instantiates a builder sub-agent with a real LLM and stubbed services,
 // runs it to completion, and evaluates the resulting workflow with binary checks.
-//
-// Heavy deps (@mastra/core) are loaded via dynamic import() to avoid
-// ESM resolution issues with tsx at the top level.
 // ---------------------------------------------------------------------------
 
 import type { ToolsInput } from '@mastra/core/agent';
 
+import { createSubAgent } from '../../src/agent/sub-agent-factory';
+import { BUILDER_AGENT_PROMPT } from '../../src/tools/orchestration/build-workflow-agent.prompt';
+import { createAllTools } from '../../src/tools/index';
 import { runBinaryChecks } from '../binaryChecks/index';
 import type { BinaryCheckContext } from '../binaryChecks/types';
 import type { WorkflowResponse } from '../clients/n8n-client';
@@ -22,38 +22,35 @@ import type {
 	CapturedWorkflow,
 } from './types';
 
-/**
- * Load modules that pull in @mastra/core.
- *
- * At runtime, mastra is preloaded via preload-mastra.cjs so CJS require()
- * resolves correctly. We use require() here to avoid tsx/ESM resolution issues.
- */
-function loadAgentDeps() {
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	const { createSubAgent } =
-		require('../../src/agent/sub-agent-factory') as typeof import('../../src/agent/sub-agent-factory');
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	const { BUILDER_AGENT_PROMPT } =
-		require('../../src/tools/orchestration/build-workflow-agent.prompt') as typeof import('../../src/tools/orchestration/build-workflow-agent.prompt');
-	// eslint-disable-next-line @typescript-eslint/no-require-imports
-	const { createAllTools } =
-		require('../../src/tools/index') as typeof import('../../src/tools/index');
-	return { createSubAgent, BUILDER_AGENT_PROMPT, createAllTools };
-}
-
 // ---------------------------------------------------------------------------
 // Default builder tool set (tool-mode, no sandbox)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BUILDER_TOOLS = [
-	'build-workflow',
-	'search-nodes',
-	'get-suggested-nodes',
-	'get-node-type-definition',
-	'list-workflows',
-	'get-workflow-as-code',
-	'ask-user',
-];
+// ---------------------------------------------------------------------------
+// Sub-agent type definitions
+// ---------------------------------------------------------------------------
+
+interface SubAgentTypeConfig {
+	/** System prompt key to load from build-workflow-agent.prompt */
+	promptKey: 'BUILDER_AGENT_PROMPT';
+	/** Default tools when test case doesn't specify */
+	defaultTools: string[];
+}
+
+const SUBAGENT_TYPES: Record<string, SubAgentTypeConfig> = {
+	builder: {
+		promptKey: 'BUILDER_AGENT_PROMPT',
+		defaultTools: [
+			'build-workflow',
+			'search-nodes',
+			'get-suggested-nodes',
+			'get-node-type-definition',
+			'list-workflows',
+			'get-workflow-as-code',
+			'ask-user',
+		],
+	},
+};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -72,13 +69,33 @@ export async function runSubAgent(
 	const startMs = Date.now();
 	const maxSteps = testCase.maxSteps ?? config.maxSteps ?? 20;
 	const timeoutMs = config.timeoutMs ?? 120_000;
-	const toolNames = testCase.tools ?? DEFAULT_BUILDER_TOOLS;
+	const subagentType = testCase.subagent ?? 'builder';
+
+	const typeConfig = SUBAGENT_TYPES[subagentType];
+	if (!typeConfig) {
+		const available = Object.keys(SUBAGENT_TYPES).join(', ');
+		return {
+			testCase,
+			text: '',
+			capturedWorkflows: [],
+			feedback: [
+				{
+					evaluator: 'subagent-runner',
+					metric: 'run_error',
+					score: 0,
+					kind: 'score',
+					comment: `Unknown sub-agent type "${subagentType}". Available: ${available}`,
+				},
+			],
+			durationMs: Date.now() - startMs,
+			error: `Unknown sub-agent type "${subagentType}"`,
+		};
+	}
+
+	const toolNames = testCase.tools ?? typeConfig.defaultTools;
 
 	try {
-		// 1. Load mastra-dependent modules (preloaded via preload-mastra.cjs)
-		const { createSubAgent, BUILDER_AGENT_PROMPT, createAllTools } = loadAgentDeps();
-
-		// 2. Build stubbed context and tools
+		// 1. Build stubbed context and tools
 		const { context, capture } = createStubContext();
 		const allTools = createAllTools(context);
 
@@ -90,16 +107,19 @@ export async function runSubAgent(
 			}
 		}
 
-		// 3. Create the sub-agent (same factory the orchestrator uses)
+		// 2. Create the sub-agent (same factory the orchestrator uses)
+		const promptMap: Record<string, string> = { BUILDER_AGENT_PROMPT };
+		const instructions = promptMap[typeConfig.promptKey];
+
 		const agent = createSubAgent({
-			agentId: `eval-builder-${testCase.id}`,
-			role: 'workflow-builder',
-			instructions: BUILDER_AGENT_PROMPT,
+			agentId: `eval-${subagentType}-${testCase.id}`,
+			role: subagentType,
+			instructions,
 			tools,
 			modelId: config.modelId,
 		});
 
-		// 4. Run with timeout
+		// 3. Run with timeout
 		const abortController = new AbortController();
 		const timeoutId = setTimeout(() => {
 			abortController.abort(new Error(`Sub-agent timed out after ${String(timeoutMs)}ms`));
@@ -116,7 +136,7 @@ export async function runSubAgent(
 			clearTimeout(timeoutId);
 		}
 
-		// 5. Evaluate captured workflows
+		// 4. Evaluate captured workflows
 		const feedback = evaluateCapturedWorkflows(capture.workflows, testCase.prompt);
 
 		return {

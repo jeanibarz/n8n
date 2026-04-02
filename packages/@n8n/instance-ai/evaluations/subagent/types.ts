@@ -24,7 +24,9 @@ export interface SubAgentTestCase {
 	id: string;
 	/** The prompt / task description sent to the sub-agent */
 	prompt: string;
-	/** Tool names to give the sub-agent. Defaults to builder tool set if omitted. */
+	/** Sub-agent type. Determines system prompt and default tools. Defaults to 'builder'. */
+	subagent?: string;
+	/** Tool names to give the sub-agent. Defaults to the sub-agent type's default set if omitted. */
 	tools?: string[];
 	/** Max agent steps before timeout. Defaults to 20. */
 	maxSteps?: number;
