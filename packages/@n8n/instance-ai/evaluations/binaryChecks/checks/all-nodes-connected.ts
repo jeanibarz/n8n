@@ -4,15 +4,13 @@ import type { BinaryCheck } from '../types';
 const STICKY_NOTE_TYPE = 'n8n-nodes-base.stickyNote';
 
 /**
+ * Collect all nodes that appear in the connections object — as source or target.
+ *
  * n8n connections format:
  * { [sourceNode]: { main: [ [ { node: targetNode, type: string, index: number } ] ] } }
- *
- * A node is "connected" if it appears as a source key or as a target in any
- * connection entry. We walk the full graph to find all reachable nodes.
  */
 function collectConnectedNodes(connections: Record<string, unknown>): Set<string> {
 	const connected = new Set<string>();
-	const adjacency = new Map<string, string[]>();
 
 	for (const [sourceName, outputs] of Object.entries(connections)) {
 		connected.add(sourceName);
@@ -24,30 +22,14 @@ function collectConnectedNodes(connections: Record<string, unknown>): Set<string
 				if (!Array.isArray(outputSlot)) continue;
 				for (const link of outputSlot) {
 					if (typeof link === 'object' && link !== null && 'node' in link) {
-						const target = (link as { node: string }).node;
-						connected.add(target);
-						if (!adjacency.has(sourceName)) adjacency.set(sourceName, []);
-						adjacency.get(sourceName)!.push(target);
+						connected.add((link as { node: string }).node);
 					}
 				}
 			}
 		}
 	}
 
-	// BFS to find all transitively reachable nodes
-	const visited = new Set<string>(connected);
-	const queue = Array.from(connected);
-	while (queue.length > 0) {
-		const current = queue.shift()!;
-		for (const neighbor of adjacency.get(current) ?? []) {
-			if (!visited.has(neighbor)) {
-				visited.add(neighbor);
-				queue.push(neighbor);
-			}
-		}
-	}
-
-	return visited;
+	return connected;
 }
 
 export const allNodesConnected: BinaryCheck = {

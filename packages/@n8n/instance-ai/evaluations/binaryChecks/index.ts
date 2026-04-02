@@ -5,7 +5,7 @@
 // returns Feedback[] compatible with the existing harness.
 // ---------------------------------------------------------------------------
 
-import type { Feedback } from '../types';
+import type { Feedback } from '../subagent/types';
 import type { WorkflowResponse } from '../clients/n8n-client';
 import { CHECKS } from './checks/index';
 import type { BinaryCheck, BinaryCheckContext } from './types';
@@ -53,15 +53,16 @@ export function runBinaryChecks(
 	});
 
 	// Overall pass rate as the evaluator-level score
+	const totalChecks = feedback.length;
 	const passCount = feedback.filter((f) => f.score === 1).length;
-	const passRate = feedback.length > 0 ? passCount / feedback.length : 0;
+	const passRate = totalChecks > 0 ? passCount / totalChecks : 0;
 
 	feedback.push({
 		evaluator: EVALUATOR_NAME,
 		metric: 'pass_rate',
 		score: passRate,
 		kind: 'score',
-		comment: `${String(passCount)}/${String(feedback.length - 1)} checks passed`,
+		comment: `${String(passCount)}/${String(totalChecks)} checks passed`,
 	});
 
 	return feedback;

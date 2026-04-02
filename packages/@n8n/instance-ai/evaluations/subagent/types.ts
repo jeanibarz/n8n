@@ -4,7 +4,16 @@
 
 import type { WorkflowJSON } from '@n8n/workflow-sdk';
 
-import type { Feedback } from '../types';
+/**
+ * Evaluation feedback item. Compatible with LangSmith scoring.
+ */
+export interface Feedback {
+	evaluator: string;
+	metric: string;
+	score: number;
+	comment?: string;
+	kind: 'score' | 'metric' | 'detail';
+}
 
 /**
  * A single sub-agent test case.

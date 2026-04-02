@@ -13,9 +13,9 @@ import type { ToolsInput } from '@mastra/core/agent';
 import { runBinaryChecks } from '../binaryChecks/index';
 import type { BinaryCheckContext } from '../binaryChecks/types';
 import type { WorkflowResponse } from '../clients/n8n-client';
-import type { Feedback } from '../types';
 import { createStubContext } from './stub-context';
 import type {
+	Feedback,
 	SubAgentTestCase,
 	SubAgentResult,
 	SubAgentRunnerConfig,
@@ -192,7 +192,7 @@ function toWorkflowResponse(captured: CapturedWorkflow): WorkflowResponse {
 			name: n.name ?? '',
 			type: n.type,
 			parameters: n.parameters as Record<string, unknown> | undefined,
-			disabled: false,
+			disabled: (n as { disabled?: boolean }).disabled,
 			credentials: n.credentials as Record<string, unknown> | undefined,
 		})),
 		connections: (json.connections ?? {}) as Record<string, unknown>,

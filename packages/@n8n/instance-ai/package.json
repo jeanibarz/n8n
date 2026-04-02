@@ -11,7 +11,7 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "eval:instance-ai": "tsx evaluations/cli/index.ts",
-    "eval:subagent": "node -r ./evaluations/subagent/preload-mastra.cjs -r tsx/cjs -e \"require('./evaluations/subagent/cli.ts')\""
+    "eval:subagent": "node evaluations/subagent/boot.cjs"
   },
   "main": "dist/index.js",
   "module": "src/index.ts",
