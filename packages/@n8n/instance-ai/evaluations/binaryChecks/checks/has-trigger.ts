@@ -1,14 +1,22 @@
 import type { BinaryCheck } from '../types';
 
 const TRIGGER_SUFFIX = 'Trigger';
-const MANUAL_TRIGGER = 'n8n-nodes-base.manualTrigger';
-const SCHEDULE_TRIGGER = 'n8n-nodes-base.scheduleTrigger';
-const START_NODE = 'n8n-nodes-base.start';
+
+/** Nodes that act as triggers but don't follow the *Trigger naming convention */
+const KNOWN_TRIGGER_TYPES = new Set([
+	'n8n-nodes-base.manualTrigger',
+	'n8n-nodes-base.scheduleTrigger',
+	'n8n-nodes-base.start',
+	'n8n-nodes-base.webhook',
+	'n8n-nodes-base.formTrigger',
+	'@n8n/n8n-nodes-langchain.chatTrigger',
+	'@n8n/n8n-nodes-langchain.mcpTrigger',
+]);
 
 function isTriggerNode(type: string): boolean {
-	if (type === MANUAL_TRIGGER || type === SCHEDULE_TRIGGER || type === START_NODE) return true;
+	if (KNOWN_TRIGGER_TYPES.has(type)) return true;
 
-	// Convention: trigger nodes end with "Trigger" (e.g. n8n-nodes-base.webhookTrigger)
+	// Convention: most trigger nodes end with "Trigger"
 	const shortName = type.split('.').pop() ?? '';
 	return shortName.endsWith(TRIGGER_SUFFIX);
 }

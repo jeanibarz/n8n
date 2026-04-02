@@ -1,6 +1,6 @@
-import type { WorkflowResponse } from '../clients/n8n-client';
-import { runBinaryChecks } from '../binaryChecks/index';
-import type { BinaryCheckContext } from '../binaryChecks/types';
+import type { WorkflowResponse } from '../../evaluations/clients/n8n-client';
+import { runBinaryChecks } from '../../evaluations/binaryChecks/index';
+import type { BinaryCheckContext } from '../../evaluations/binaryChecks/types';
 
 const ctx: BinaryCheckContext = { prompt: 'Build a workflow' };
 
