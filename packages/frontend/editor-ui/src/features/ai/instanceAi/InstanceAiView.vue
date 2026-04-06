@@ -281,6 +281,14 @@ const routeThreadId = computed(() =>
 	typeof route.params.threadId === 'string' ? route.params.threadId : null,
 );
 
+function reconnectThreadIfHydrationApplied(threadId: string): void {
+	void store.loadHistoricalMessages(threadId).then((hydrationStatus) => {
+		if (hydrationStatus === 'stale') return;
+		void store.loadThreadStatus(threadId);
+		store.connectSSE(threadId);
+	});
+}
+
 watch(
 	routeThreadId,
 	(threadId) => {
@@ -294,10 +302,7 @@ watch(
 				});
 			}
 			if (store.sseState === 'disconnected') {
-				void store.loadHistoricalMessages(store.currentThreadId).then(() => {
-					void store.loadThreadStatus(store.currentThreadId);
-					store.connectSSE();
-				});
+				reconnectThreadIfHydrationApplied(store.currentThreadId);
 			}
 			return;
 		}
@@ -305,10 +310,7 @@ watch(
 			// Re-entering the same thread (e.g. after navigating away and back) —
 			// SSE was closed on unmount, reconnect if needed.
 			if (store.sseState === 'disconnected') {
-				void store.loadHistoricalMessages(threadId).then(() => {
-					void store.loadThreadStatus(threadId);
-					store.connectSSE();
-				});
+				reconnectThreadIfHydrationApplied(threadId);
 			}
 			return;
 		}

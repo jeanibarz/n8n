@@ -51,6 +51,8 @@ export interface PendingConfirmationItem {
 	messageId: string;
 }
 
+type HistoricalHydrationStatus = 'applied' | 'stale' | 'skipped';
+
 /** Walk an agent tree, collecting tool calls that have an active (pending) confirmation. */
 function collectPendingConfirmations(
 	node: InstanceAiAgentNode,
@@ -142,6 +144,8 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 	const creditsClaimed = ref<number | undefined>(undefined);
 	const resolvedConfirmationIds = ref<Map<string, 'approved' | 'denied' | 'deferred'>>(new Map());
 	const MAX_DEBUG_EVENTS = 1000;
+	let hydrationRequestSequence = 0;
+	let activeHydrationRequestToken: number | null = null;
 
 	// --- Computed ---
 	const isStreaming = computed(() => activeRunId.value !== null);
@@ -479,11 +483,8 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 		sseState.value = 'disconnected';
 	}
 
-	function switchThread(threadId: string): void {
-		// 1. Close current SSE connection
-		closeSSE();
-		// 2. Clear store state
-		hydratingThreadId.value = threadId;
+	function resetThreadRuntimeState(nextHydratingThreadId: string | null): void {
+		hydratingThreadId.value = nextHydratingThreadId;
 		messages.value = [];
 		latestTasks.value = null;
 		activeRunId.value = null;
@@ -492,13 +493,27 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 		resolvedConfirmationIds.value = new Map();
 		runStateByGroupId = {};
 		groupIdByRunId = {};
+		activeHydrationRequestToken = null;
+	}
+
+	function switchThread(threadId: string): void {
+		// 1. Close current SSE connection
+		closeSSE();
+		// 2. Clear store state
+		resetThreadRuntimeState(threadId);
 		// 3. Switch thread
 		currentThreadId.value = threadId;
 		// 4. Load rich historical messages first, then connect SSE after.
 		//    loadHistoricalMessages sets the SSE cursor (nextEventId) so SSE
 		//    only receives events that arrived AFTER the historical snapshot.
+		const hydrationRequestToken = ++hydrationRequestSequence;
+		activeHydrationRequestToken = hydrationRequestToken;
 		delete lastEventIdByThread.value[threadId];
-		void loadHistoricalMessages(threadId).then(() => {
+		void loadHistoricalMessages(threadId, hydrationRequestToken).then((hydrationStatus) => {
+			if (hydrationStatus !== 'stale' && activeHydrationRequestToken === hydrationRequestToken) {
+				activeHydrationRequestToken = null;
+			}
+			if (hydrationStatus !== 'applied') return;
 			void loadThreadStatus(threadId);
 			connectSSE(threadId);
 		});
@@ -509,15 +524,7 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 	function newThread(): string {
 		const newThreadId = uuidv4();
 		closeSSE();
-		hydratingThreadId.value = null;
-		messages.value = [];
-		latestTasks.value = null;
-		activeRunId.value = null;
-		debugEvents.value = [];
-		resetFeedback();
-		resolvedConfirmationIds.value = new Map();
-		runStateByGroupId = {};
-		groupIdByRunId = {};
+		resetThreadRuntimeState(null);
 		currentThreadId.value = newThreadId;
 
 		threads.value.unshift({
@@ -560,15 +567,7 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 				// No threads left — create a new one
 				const freshId = uuidv4();
 				closeSSE();
-				hydratingThreadId.value = null;
-				messages.value = [];
-				latestTasks.value = null;
-				activeRunId.value = null;
-				debugEvents.value = [];
-				resetFeedback();
-				resolvedConfirmationIds.value = new Map();
-				runStateByGroupId = {};
-				groupIdByRunId = {};
+				resetThreadRuntimeState(null);
 				currentThreadId.value = freshId;
 				threads.value.push({
 					id: freshId,
@@ -623,13 +622,23 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 		});
 	}
 
-	async function loadHistoricalMessages(threadId: string): Promise<void> {
+	async function loadHistoricalMessages(
+		threadId: string,
+		hydrationRequestToken?: number,
+	): Promise<HistoricalHydrationStatus> {
 		hydratingThreadId.value = threadId;
+		const effectiveHydrationRequestToken = hydrationRequestToken ?? ++hydrationRequestSequence;
+		if (hydrationRequestToken === undefined) {
+			activeHydrationRequestToken = effectiveHydrationRequestToken;
+		}
+		const isCurrentHydrationRequest = () =>
+			activeHydrationRequestToken === effectiveHydrationRequestToken;
 
 		try {
 			const result = await fetchThreadMessagesApi(rootStore.restApiContext, threadId, 100);
+			if (!isCurrentHydrationRequest()) return 'stale';
 			// Only hydrate if we're still on the same thread and SSE hasn't delivered messages
-			if (currentThreadId.value !== threadId || messages.value.length > 0) return;
+			if (currentThreadId.value !== threadId || messages.value.length > 0) return 'skipped';
 			// Backend now returns InstanceAiMessage[] directly — no conversion needed
 			if (result.messages.length > 0) {
 				messages.value = result.messages;
@@ -662,10 +671,12 @@ export const useInstanceAiStore = defineStore('instanceAi', () => {
 			if (result.nextEventId !== null && result.nextEventId !== undefined) {
 				lastEventIdByThread.value[threadId] = result.nextEventId - 1;
 			}
+			return 'applied';
 		} catch {
 			// Silently ignore — messages will appear if SSE delivers them
+			return isCurrentHydrationRequest() ? 'applied' : 'stale';
 		} finally {
-			if (hydratingThreadId.value === threadId) {
+			if (isCurrentHydrationRequest() && hydratingThreadId.value === threadId) {
 				hydratingThreadId.value = null;
 			}
 		}

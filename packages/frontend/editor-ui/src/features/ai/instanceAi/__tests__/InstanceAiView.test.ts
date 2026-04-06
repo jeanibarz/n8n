@@ -38,7 +38,7 @@ const createStoreState = () =>
 		startCreditsPushListener: vi.fn(),
 		stopCreditsPushListener: vi.fn(),
 		closeSSE: vi.fn(),
-		loadHistoricalMessages: vi.fn(async () => undefined),
+		loadHistoricalMessages: vi.fn(async () => 'applied'),
 		loadThreadStatus: vi.fn(),
 		connectSSE: vi.fn(),
 		switchThread: vi.fn(),
@@ -47,6 +47,15 @@ const createStoreState = () =>
 	});
 
 const storeRef = { current: createStoreState() };
+const routeRef = reactive({
+	params: {} as Record<string, unknown>,
+	path: '/instance-ai',
+	matched: [] as unknown[],
+	fullPath: '/instance-ai',
+	query: {} as Record<string, unknown>,
+	hash: '',
+	meta: {} as Record<string, unknown>,
+});
 
 vi.mock('../instanceAi.store', () => ({
 	useInstanceAiStore: () => storeRef.current,
@@ -91,15 +100,7 @@ vi.mock('@/app/composables/usePageRedirectionHelper', () => ({
 }));
 
 vi.mock('vue-router', () => ({
-	useRoute: () => ({
-		params: {},
-		path: '/instance-ai',
-		matched: [],
-		fullPath: '/instance-ai',
-		query: {},
-		hash: '',
-		meta: {},
-	}),
+	useRoute: () => routeRef,
 	useRouter: () => ({
 		push: vi.fn(),
 	}),
@@ -295,6 +296,9 @@ describe('InstanceAiView', () => {
 
 	beforeEach(() => {
 		storeRef.current = createStoreState();
+		routeRef.params = {};
+		routeRef.path = '/instance-ai';
+		routeRef.fullPath = '/instance-ai';
 	});
 
 	afterEach(() => {
@@ -352,5 +356,45 @@ describe('InstanceAiView', () => {
 		const { getByTestId } = renderView();
 
 		expect(getByTestId('instance-ai-input-stub')).toHaveTextContent('unset');
+	});
+
+	it('does not reconnect when direct hydration is stale', async () => {
+		storeRef.current.sseState = 'disconnected';
+		storeRef.current.loadHistoricalMessages = vi.fn(async () => 'stale');
+
+		renderView();
+
+		await vi.waitFor(() => {
+			expect(storeRef.current.loadHistoricalMessages).toHaveBeenCalledWith('thread-1');
+		});
+		expect(storeRef.current.loadThreadStatus).not.toHaveBeenCalled();
+		expect(storeRef.current.connectSSE).not.toHaveBeenCalled();
+	});
+
+	it('reconnects on same-thread re-entry when hydration is skipped', async () => {
+		routeRef.params = { threadId: 'thread-1' };
+		routeRef.path = '/instance-ai/thread-1';
+		routeRef.fullPath = '/instance-ai/thread-1';
+		storeRef.current.currentThreadId = 'thread-1';
+		storeRef.current.sseState = 'disconnected';
+		storeRef.current.hasMessages = true;
+		storeRef.current.messages = [
+			{
+				id: 'msg-history',
+				role: 'assistant',
+				content: 'already loaded',
+				isStreaming: false,
+				createdAt: '2026-04-01T00:00:00.000Z',
+			},
+		];
+		storeRef.current.loadHistoricalMessages = vi.fn(async () => 'skipped');
+
+		renderView();
+
+		await vi.waitFor(() => {
+			expect(storeRef.current.loadHistoricalMessages).toHaveBeenCalledWith('thread-1');
+		});
+		expect(storeRef.current.loadThreadStatus).toHaveBeenCalledWith('thread-1');
+		expect(storeRef.current.connectSSE).toHaveBeenCalledWith('thread-1');
 	});
 });

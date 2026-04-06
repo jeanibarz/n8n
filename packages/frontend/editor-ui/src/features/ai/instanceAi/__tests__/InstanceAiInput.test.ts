@@ -4,6 +4,7 @@ import { fireEvent, waitFor, within } from '@testing-library/vue';
 import { reactive } from 'vue';
 import { createComponentRenderer } from '@/__tests__/render';
 import InstanceAiInput from '../components/InstanceAiInput.vue';
+import { INSTANCE_AI_EMPTY_STATE_SUGGESTIONS as suggestions } from '../emptyStateSuggestions';
 
 const toggleResearchMode = vi.fn();
 const storeState = reactive({
@@ -18,63 +19,6 @@ vi.mock('../instanceAi.store', () => ({
 	useInstanceAiStore: vi.fn(() => storeState),
 }));
 
-const suggestions = [
-	{
-		type: 'prompt',
-		id: 'build-workflow',
-		icon: 'workflow',
-		labelKey: 'instanceAi.emptyState.suggestions.buildWorkflow.label',
-		promptKey: 'instanceAi.emptyState.suggestions.buildWorkflow.prompt',
-	},
-	{
-		type: 'prompt',
-		id: 'build-agent',
-		icon: 'bot',
-		labelKey: 'instanceAi.emptyState.suggestions.buildAgent.label',
-		promptKey: 'instanceAi.emptyState.suggestions.buildAgent.prompt',
-	},
-	{
-		type: 'prompt',
-		id: 'find-automation-ideas',
-		icon: 'lightbulb',
-		labelKey: 'instanceAi.emptyState.suggestions.findAutomationIdeas.label',
-		promptKey: 'instanceAi.emptyState.suggestions.findAutomationIdeas.prompt',
-	},
-	{
-		type: 'menu',
-		id: 'quick-examples',
-		icon: 'zap',
-		labelKey: 'instanceAi.emptyState.suggestions.quickExamples.label',
-		examples: [
-			{
-				id: 'monitor-competitors',
-				labelKey: 'instanceAi.emptyState.quickExamples.monitorCompetitors.label',
-				promptKey: 'instanceAi.emptyState.quickExamples.monitorCompetitors.prompt',
-			},
-			{
-				id: 'automate-inbox',
-				labelKey: 'instanceAi.emptyState.quickExamples.automateInbox.label',
-				promptKey: 'instanceAi.emptyState.quickExamples.automateInbox.prompt',
-			},
-			{
-				id: 'answer-support-requests',
-				labelKey: 'instanceAi.emptyState.quickExamples.answerSupportRequests.label',
-				promptKey: 'instanceAi.emptyState.quickExamples.answerSupportRequests.prompt',
-			},
-			{
-				id: 'analyse-ad-spend',
-				labelKey: 'instanceAi.emptyState.quickExamples.analyseAdSpend.label',
-				promptKey: 'instanceAi.emptyState.quickExamples.analyseAdSpend.prompt',
-			},
-			{
-				id: 'get-news-summary',
-				labelKey: 'instanceAi.emptyState.quickExamples.getNewsSummary.label',
-				promptKey: 'instanceAi.emptyState.quickExamples.getNewsSummary.prompt',
-			},
-		],
-	},
-] as const;
-
 const renderComponent = createComponentRenderer(InstanceAiInput);
 
 describe('InstanceAiInput', () => {
@@ -84,6 +28,17 @@ describe('InstanceAiInput', () => {
 		storeState.contextualSuggestion = null;
 		storeState.researchMode = false;
 		storeState.isSendingMessage = false;
+	});
+
+	it('uses the shared suggestions fixture with the expected top-level contract', () => {
+		expect(suggestions.map((suggestion) => ({ id: suggestion.id, type: suggestion.type }))).toEqual(
+			[
+				{ id: 'build-workflow', type: 'prompt' },
+				{ id: 'build-agent', type: 'prompt' },
+				{ id: 'find-automation-ideas', type: 'prompt' },
+				{ id: 'quick-examples', type: 'menu' },
+			],
+		);
 	});
 
 	it('renders the four empty-state suggestions when the textarea is empty', () => {
@@ -145,6 +100,23 @@ describe('InstanceAiInput', () => {
 		expect(textbox).toHaveAttribute('placeholder', initialPlaceholder ?? '');
 	});
 
+	it('keeps suggestions visible for whitespace-only input but does not preview a ghost prompt', async () => {
+		const { getByRole, getByTestId } = renderComponent({
+			props: {
+				isStreaming: false,
+				suggestions,
+			},
+		});
+
+		const textbox = getByRole('textbox');
+		const initialPlaceholder = textbox.getAttribute('placeholder') ?? '';
+		await userEvent.type(textbox, '   ');
+
+		expect(getByTestId('instance-ai-suggestion-build-workflow')).toBeInTheDocument();
+		await userEvent.hover(getByTestId('instance-ai-suggestion-build-workflow'));
+		expect(textbox).toHaveAttribute('placeholder', initialPlaceholder);
+	});
+
 	it('shows a ghost prompt in the placeholder when hovering a quick example row', async () => {
 		const { getByRole, getByTestId } = renderComponent({
 			props: {
@@ -167,6 +139,27 @@ describe('InstanceAiInput', () => {
 		await userEvent.unhover(getByTestId('instance-ai-quick-example-monitor-competitors'));
 
 		expect(textbox).toHaveAttribute('placeholder', initialPlaceholder ?? '');
+	});
+
+	it('clears the ghost prompt when quick examples are closed by clicking outside', async () => {
+		const { getByRole, getByTestId, queryByTestId } = renderComponent({
+			props: {
+				isStreaming: false,
+				suggestions,
+			},
+		});
+
+		const textbox = getByRole('textbox');
+		const initialPlaceholder = textbox.getAttribute('placeholder') ?? '';
+
+		await userEvent.click(getByTestId('instance-ai-suggestion-quick-examples'));
+		await userEvent.hover(getByTestId('instance-ai-quick-example-monitor-competitors'));
+		expect(textbox.getAttribute('placeholder')).not.toBe(initialPlaceholder);
+
+		await fireEvent.click(document.body);
+
+		expect(queryByTestId('instance-ai-quick-examples-panel')).not.toBeInTheDocument();
+		expect(textbox).toHaveAttribute('placeholder', initialPlaceholder);
 	});
 
 	it('submits immediately when a prompt suggestion is clicked', async () => {
@@ -250,6 +243,27 @@ describe('InstanceAiInput', () => {
 
 		await waitFor(() => {
 			expect(queryByTestId('instance-ai-suggestion-build-workflow')).not.toBeInTheDocument();
+		});
+	});
+
+	it('clears the ghost prompt when suggestions become hidden', async () => {
+		const { getByRole, getByTestId, queryByTestId } = renderComponent({
+			props: {
+				isStreaming: false,
+				suggestions,
+			},
+		});
+
+		const textbox = getByRole('textbox');
+		const initialPlaceholder = textbox.getAttribute('placeholder') ?? '';
+		await userEvent.hover(getByTestId('instance-ai-suggestion-build-workflow'));
+		expect(textbox.getAttribute('placeholder')).not.toBe(initialPlaceholder);
+
+		storeState.isSendingMessage = true;
+
+		await waitFor(() => {
+			expect(queryByTestId('instance-ai-suggestion-build-workflow')).not.toBeInTheDocument();
+			expect(textbox).toHaveAttribute('placeholder', initialPlaceholder);
 		});
 	});
 
