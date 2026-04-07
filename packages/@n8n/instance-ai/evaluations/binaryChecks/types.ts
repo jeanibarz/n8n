@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // Binary check types for instance-ai workflow evaluation
 //
-// Binary checks are deterministic pass/fail assertions on a built workflow.
-// They run without LLM calls and produce a Feedback item with score 0 or 1.
+// Binary checks are pass/fail assertions on a built workflow.
+// Deterministic checks run without LLM calls; LLM checks call an eval agent.
+// Each produces a Feedback item with score 0 or 1.
 // ---------------------------------------------------------------------------
 
 import type { WorkflowResponse } from '../clients/n8n-client';
@@ -18,21 +19,28 @@ export interface BinaryCheckResult {
 /**
  * Context available to every binary check.
  *
- * Kept intentionally lean — checks should be fast and deterministic.
- * Add fields here only when a check genuinely needs external context.
+ * Deterministic checks only need `prompt`. LLM checks additionally need
+ * `modelId` to create an eval agent. Add fields here only when a check
+ * genuinely needs external context.
  */
 export interface BinaryCheckContext {
 	/** The original user prompt that triggered the build */
 	prompt: string;
+	/** Anthropic model ID for LLM checks (e.g. 'anthropic/claude-sonnet-4-6'). LLM checks are skipped when absent. */
+	modelId?: string;
+	/** Timeout in ms for LLM checks. Defaults to 30_000. */
+	timeoutMs?: number;
 }
 
 /**
- * A single deterministic check that inspects a workflow and returns pass/fail.
+ * A single check that inspects a workflow and returns pass/fail.
  */
 export interface BinaryCheck {
 	/** Unique identifier used as the Feedback metric name */
 	name: string;
 	/** Human-readable description for reports */
 	description: string;
-	run(workflow: WorkflowResponse, ctx: BinaryCheckContext): BinaryCheckResult;
+	/** Whether this check requires an LLM call */
+	kind: 'deterministic' | 'llm';
+	run(workflow: WorkflowResponse, ctx: BinaryCheckContext): Promise<BinaryCheckResult>;
 }
