@@ -109,7 +109,7 @@ export async function runSubAgent(
 
 		// 2. Create the sub-agent (same factory the orchestrator uses)
 		const promptMap: Record<string, string> = { BUILDER_AGENT_PROMPT };
-		const instructions = promptMap[typeConfig.promptKey];
+		const instructions = testCase.systemPrompt ?? promptMap[typeConfig.promptKey];
 
 		const agent = createSubAgent({
 			agentId: `eval-${subagentType}-${testCase.id}`,
@@ -137,7 +137,11 @@ export async function runSubAgent(
 		}
 
 		// 4. Evaluate captured workflows
-		const feedback = evaluateCapturedWorkflows(capture.workflows, testCase.prompt);
+		const feedback = await evaluateCapturedWorkflows(
+			capture.workflows,
+			testCase.prompt,
+			config.modelId,
+		);
 
 		return {
 			testCase,
@@ -171,7 +175,11 @@ export async function runSubAgent(
 // Internal: evaluate captured workflows
 // ---------------------------------------------------------------------------
 
-function evaluateCapturedWorkflows(captured: CapturedWorkflow[], prompt: string): Feedback[] {
+async function evaluateCapturedWorkflows(
+	captured: CapturedWorkflow[],
+	prompt: string,
+	modelId: string,
+): Promise<Feedback[]> {
 	const feedback: Feedback[] = [];
 
 	// Did the agent produce any workflow?
@@ -191,8 +199,8 @@ function evaluateCapturedWorkflows(captured: CapturedWorkflow[], prompt: string)
 	// Run binary checks on the last captured workflow (final version)
 	const last = captured[captured.length - 1];
 	const workflowResponse = toWorkflowResponse(last);
-	const ctx: BinaryCheckContext = { prompt };
-	const binaryFeedback = runBinaryChecks(workflowResponse, ctx);
+	const ctx: BinaryCheckContext = { prompt, modelId };
+	const binaryFeedback = await runBinaryChecks(workflowResponse, ctx);
 	feedback.push(...binaryFeedback);
 
 	return feedback;

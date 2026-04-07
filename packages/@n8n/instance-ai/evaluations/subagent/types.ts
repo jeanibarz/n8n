@@ -26,6 +26,8 @@ export interface SubAgentTestCase {
 	prompt: string;
 	/** Sub-agent type. Determines system prompt and default tools. Defaults to 'builder'. */
 	subagent?: string;
+	/** Optional system prompt override. Defaults to the sub-agent type's built-in prompt. */
+	systemPrompt?: string;
 	/** Tool names to give the sub-agent. Defaults to the sub-agent type's default set if omitted. */
 	tools?: string[];
 	/** Max agent steps before timeout. Defaults to 20. */

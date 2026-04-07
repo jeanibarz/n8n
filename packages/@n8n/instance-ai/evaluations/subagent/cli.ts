@@ -43,7 +43,7 @@ function parseArgs(argv: string[]): CliArgs {
 		maxSteps: 20,
 		modelId: process.env.N8N_INSTANCE_AI_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-20250514',
 		subagent: 'builder',
-		concurrency: 1,
+		concurrency: 5,
 	};
 
 	for (let i = 0; i < argv.length; i++) {
@@ -113,6 +113,7 @@ function loadLocalTestCases(filter?: string, subagent?: string): SubAgentTestCas
 			id?: string;
 			prompt: string;
 			subagent?: string;
+			systemPrompt?: string;
 			tools?: string[];
 			maxSteps?: number;
 		};
@@ -120,6 +121,7 @@ function loadLocalTestCases(filter?: string, subagent?: string): SubAgentTestCas
 			id: parsed.id ?? basename(file, '.json'),
 			prompt: parsed.prompt,
 			subagent: parsed.subagent ?? subagent,
+			systemPrompt: parsed.systemPrompt,
 			tools: parsed.tools,
 			maxSteps: parsed.maxSteps,
 		};
@@ -271,19 +273,41 @@ async function runLocalMode(args: CliArgs, config: SubAgentRunnerConfig): Promis
 	}
 
 	console.log(
-		`Running ${String(testCases.length)} sub-agent test case(s) with model ${config.modelId}\n`,
+		`Running ${String(testCases.length)} sub-agent test case(s) with model ${config.modelId} (concurrency: ${String(args.concurrency)})\n`,
 	);
 
 	const results: SubAgentResult[] = [];
 
-	for (const testCase of testCases) {
-		if (args.verbose) {
-			console.log(`Starting: ${testCase.id} — ${truncate(testCase.prompt, 80)}`);
-		}
+	if (args.concurrency <= 1) {
+		for (const testCase of testCases) {
+			if (args.verbose) {
+				console.log(`Starting: ${testCase.id} — ${truncate(testCase.prompt, 80)}`);
+			}
 
-		const result = await runSubAgent(testCase, config);
-		results.push(result);
-		printResult(result, args.verbose);
+			const result = await runSubAgent(testCase, config);
+			results.push(result);
+			printResult(result, args.verbose);
+		}
+	} else {
+		// Run test cases concurrently in batches
+		for (let i = 0; i < testCases.length; i += args.concurrency) {
+			const batch = testCases.slice(i, i + args.concurrency);
+
+			if (args.verbose) {
+				for (const tc of batch) {
+					console.log(`Starting: ${tc.id} — ${truncate(tc.prompt, 80)}`);
+				}
+			}
+
+			const batchResults = await Promise.all(
+				batch.map(async (testCase) => runSubAgent(testCase, config)),
+			);
+
+			for (const result of batchResults) {
+				results.push(result);
+				printResult(result, args.verbose);
+			}
+		}
 	}
 
 	printSummary(results);

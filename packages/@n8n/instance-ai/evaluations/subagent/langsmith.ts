@@ -2,7 +2,7 @@
 // LangSmith integration helpers for sub-agent evaluation
 // ---------------------------------------------------------------------------
 
-import type { Run } from 'langsmith/schemas';
+import type { Example, Run } from 'langsmith/schemas';
 
 import type { Feedback, SubAgentTestCase } from './types';
 
@@ -41,20 +41,29 @@ export function toLangsmithFeedback(fb: Feedback): {
 /**
  * Create a LangSmith evaluator that extracts pre-computed feedback from the
  * target function's outputs. The target stores feedback in `outputs.feedback`.
+ *
+ * Uses the destructured `{ run, outputs }` evaluator signature so the SDK
+ * passes outputs directly instead of relying on the Run object's `.outputs`
+ * property which may not be populated yet due to async timing in traceable.
  */
-export function createFeedbackExtractor(): (
-	rootRun: Run,
-) => { key: string; score: number; comment?: string }[] {
-	return (rootRun: Run) => {
-		const outputs = rootRun.outputs as Record<string, unknown> | undefined;
-		if (!outputs) return [{ key: 'error', score: 0, comment: 'No outputs from run' }];
+export function createFeedbackExtractor(): (args: {
+	run: Run;
+	example: Example;
+	inputs: Record<string, unknown>;
+	outputs: Record<string, unknown>;
+	referenceOutputs?: Record<string, unknown>;
+}) => { results: { key: string; score: number; comment?: string }[] } {
+	return ({ outputs }) => {
+		if (!outputs) {
+			return { results: [{ key: 'error', score: 0, comment: 'No outputs from run' }] };
+		}
 
 		const feedback = outputs.feedback;
 		if (!Array.isArray(feedback)) {
-			return [{ key: 'error', score: 0, comment: 'No feedback in outputs' }];
+			return { results: [{ key: 'error', score: 0, comment: 'No feedback in outputs' }] };
 		}
 
-		return (feedback as Feedback[]).map(toLangsmithFeedback);
+		return { results: (feedback as Feedback[]).map(toLangsmithFeedback) };
 	};
 }
 
@@ -69,6 +78,7 @@ export function createFeedbackExtractor(): (
  * {
  *   prompt: string,         // required
  *   subagent?: string,      // optional, defaults to 'builder'
+ *   system_prompt?: string, // optional, overrides built-in system prompt
  *   tools?: string[],       // optional
  *   maxSteps?: number,      // optional
  * }
@@ -88,6 +98,7 @@ export function mapExampleToTestCase(
 		id: exampleId ?? `ls-${Date.now()}`,
 		prompt,
 		subagent: typeof inputs.subagent === 'string' ? inputs.subagent : undefined,
+		systemPrompt: typeof inputs.system_prompt === 'string' ? inputs.system_prompt : undefined,
 		tools: Array.isArray(inputs.tools)
 			? (inputs.tools as unknown[]).filter((t): t is string => typeof t === 'string')
 			: undefined,
