@@ -47,14 +47,9 @@ function parseJudgeResult(text: string): { reasoning: string; pass: boolean } | 
 }
 
 function isJudgeResult(value: unknown): value is { reasoning: string; pass: boolean } {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'pass' in value &&
-		typeof (value as Record<string, unknown>).pass === 'boolean' &&
-		'reasoning' in value &&
-		typeof (value as Record<string, unknown>).reasoning === 'string'
-	);
+	if (typeof value !== 'object' || value === null) return false;
+	if (!('pass' in value) || !('reasoning' in value)) return false;
+	return typeof value.pass === 'boolean' && typeof value.reasoning === 'string';
 }
 
 export function createLlmCheck(options: LlmCheckOptions): BinaryCheck {
@@ -85,18 +80,22 @@ export function createLlmCheck(options: LlmCheckOptions): BinaryCheck {
 				providerOptions: { anthropic: { maxTokens: 4_096 } },
 			});
 
+			let timeoutId: ReturnType<typeof setTimeout>;
+
 			const result = await Promise.race([
 				resultPromise,
-				new Promise<never>((_, reject) =>
-					setTimeout(
+				new Promise<never>((_, reject) => {
+					timeoutId = setTimeout(
 						() =>
 							reject(
 								new Error(`LLM check "${options.name}" timed out after ${String(timeoutMs)}ms`),
 							),
 						timeoutMs,
-					),
-				),
-			]);
+					);
+				}),
+			]).finally(() => {
+				clearTimeout(timeoutId);
+			});
 
 			const text = extractText(result);
 			const parsed = parseJudgeResult(text);
