@@ -35,7 +35,8 @@ function collectConnectedNodes(connections: Record<string, unknown>): Set<string
 export const allNodesConnected: BinaryCheck = {
 	name: 'all_nodes_connected',
 	description: 'Every non-sticky node is part of the connection graph',
-	run(workflow: WorkflowResponse) {
+	kind: 'deterministic',
+	async run(workflow: WorkflowResponse) {
 		const activeNodes = (workflow.nodes ?? []).filter((n) => n.type !== STICKY_NOTE_TYPE);
 
 		if (activeNodes.length === 0) return { pass: true };

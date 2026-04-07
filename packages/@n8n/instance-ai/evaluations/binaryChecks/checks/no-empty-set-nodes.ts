@@ -10,7 +10,8 @@ const SET_NODE_TYPE = 'n8n-nodes-base.set';
 export const noEmptySetNodes: BinaryCheck = {
 	name: 'no_empty_set_nodes',
 	description: 'Set nodes have at least one assignment configured',
-	run(workflow) {
+	kind: 'deterministic',
+	async run(workflow) {
 		const setNodes = (workflow.nodes ?? []).filter((n) => n.type === SET_NODE_TYPE);
 		if (setNodes.length === 0) return { pass: true };
 

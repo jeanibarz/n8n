@@ -3,7 +3,8 @@ import type { BinaryCheck } from '../types';
 export const hasNodes: BinaryCheck = {
 	name: 'has_nodes',
 	description: 'Workflow contains at least one node',
-	run(workflow) {
+	kind: 'deterministic',
+	async run(workflow) {
 		const count = (workflow.nodes ?? []).length;
 		return {
 			pass: count > 0,
