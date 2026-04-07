@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
 // Binary checks evaluator for instance-ai
 //
-// Runs all registered deterministic checks against a built workflow and
+// Runs all registered checks against a built workflow and
 // returns Feedback[] compatible with the existing harness.
 // ---------------------------------------------------------------------------
 
 import type { Feedback } from '../subagent/types';
 import type { WorkflowResponse } from '../clients/n8n-client';
-import { CHECKS } from './checks/index';
+import { DETERMINISTIC_CHECKS, LLM_CHECKS } from './checks/index';
 import type { BinaryCheck, BinaryCheckContext } from './types';
 
 const EVALUATOR_NAME = 'binary-checks';
@@ -22,17 +22,19 @@ export interface BinaryChecksOptions {
  *
  * Each check produces one Feedback with score 0 (fail) or 1 (pass).
  * An overall score (pass rate) is emitted with kind 'score'.
+ *
+ * LLM checks are automatically skipped when `ctx.modelId` is not set.
  */
-export function runBinaryChecks(
+export async function runBinaryChecks(
 	workflow: WorkflowResponse,
 	ctx: BinaryCheckContext,
 	options?: BinaryChecksOptions,
-): Feedback[] {
-	const selected = resolveChecks(options?.only);
+): Promise<Feedback[]> {
+	const selected = resolveChecks(options?.only, ctx);
 
-	const feedback: Feedback[] = selected.map((check) => {
-		try {
-			const result = check.run(workflow, ctx);
+	const results = await Promise.allSettled(
+		selected.map(async (check) => {
+			const result = await check.run(workflow, ctx);
 			return {
 				evaluator: EVALUATOR_NAME,
 				metric: check.name,
@@ -40,16 +42,21 @@ export function runBinaryChecks(
 				kind: 'metric' as const,
 				...(result.comment ? { comment: result.comment } : {}),
 			};
-		} catch (error: unknown) {
-			const message = error instanceof Error ? error.message : String(error);
-			return {
-				evaluator: EVALUATOR_NAME,
-				metric: check.name,
-				score: 0,
-				kind: 'metric' as const,
-				comment: `Error: ${message}`,
-			};
-		}
+		}),
+	);
+
+	const feedback: Feedback[] = results.map((settled, i) => {
+		if (settled.status === 'fulfilled') return settled.value;
+
+		const message =
+			settled.reason instanceof Error ? settled.reason.message : String(settled.reason);
+		return {
+			evaluator: EVALUATOR_NAME,
+			metric: selected[i].name,
+			score: 0,
+			kind: 'metric' as const,
+			comment: `Error: ${message}`,
+		};
 	});
 
 	// Overall pass rate as the evaluator-level score
@@ -72,15 +79,20 @@ export function runBinaryChecks(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveChecks(only?: string[]): BinaryCheck[] {
-	if (!only || only.length === 0) return CHECKS;
+function resolveChecks(only: string[] | undefined, ctx: BinaryCheckContext): BinaryCheck[] {
+	const allChecks = [...DETERMINISTIC_CHECKS, ...LLM_CHECKS];
 
-	const validNames = new Set(CHECKS.map((c) => c.name));
+	// Filter out LLM checks when no modelId is available
+	const eligible = ctx.modelId ? allChecks : DETERMINISTIC_CHECKS;
+
+	if (!only || only.length === 0) return eligible;
+
+	const validNames = new Set(eligible.map((c) => c.name));
 	const unknown = only.filter((name) => !validNames.has(name));
 	if (unknown.length > 0) {
 		const available = Array.from(validNames).join(', ');
 		throw new Error(`Unknown binary check(s): ${unknown.join(', ')}. Available: ${available}`);
 	}
 
-	return CHECKS.filter((c) => only.includes(c.name));
+	return eligible.filter((c) => only.includes(c.name));
 }
