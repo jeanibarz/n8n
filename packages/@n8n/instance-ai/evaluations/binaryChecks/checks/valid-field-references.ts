@@ -160,7 +160,8 @@ function getKnownOutputFields(node: WorkflowNodeResponse): Set<string> | undefin
 			return new Set([...userFields, ...DATA_TABLE_SYSTEM_FIELDS]);
 		}
 
-		// Row get also returns columns — fall through to schema discovery
+		// Row get/delete returns all table columns — can't know them statically
+		return undefined;
 	}
 
 	// AI Agent nodes always output { output: string }
