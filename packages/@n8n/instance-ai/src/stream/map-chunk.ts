@@ -83,11 +83,13 @@ export function mapMastraChunkToEvent(
 	runId: string,
 	agentId: string,
 	chunk: unknown,
+	responseId?: string,
 ): InstanceAiEvent | null {
 	if (!isRecord(chunk)) return null;
 
 	const { type } = chunk;
 	const payload = isRecord(chunk.payload) ? chunk.payload : {};
+	const base = { runId, agentId, ...(responseId ? { responseId } : {}) };
 
 	// Mastra payload uses `text` (not `textDelta`) for text-delta chunks
 	const textValue =
@@ -100,8 +102,7 @@ export function mapMastraChunkToEvent(
 	if (type === 'text-delta' && textValue !== undefined) {
 		return {
 			type: 'text-delta',
-			runId,
-			agentId,
+			...base,
 			payload: { text: textValue },
 		};
 	}
@@ -109,8 +110,7 @@ export function mapMastraChunkToEvent(
 	if ((type === 'reasoning-delta' || type === 'reasoning') && textValue !== undefined) {
 		return {
 			type: 'reasoning-delta',
-			runId,
-			agentId,
+			...base,
 			payload: { text: textValue },
 		};
 	}
@@ -118,8 +118,7 @@ export function mapMastraChunkToEvent(
 	if (type === 'tool-call') {
 		return {
 			type: 'tool-call',
-			runId,
-			agentId,
+			...base,
 			payload: {
 				toolCallId: typeof payload.toolCallId === 'string' ? payload.toolCallId : '',
 				toolName: typeof payload.toolName === 'string' ? payload.toolName : '',
@@ -136,8 +135,7 @@ export function mapMastraChunkToEvent(
 		if (payload.isError === true) {
 			return {
 				type: 'tool-error',
-				runId,
-				agentId,
+				...base,
 				payload: {
 					toolCallId,
 					error: typeof payload.result === 'string' ? payload.result : 'Tool execution failed',
@@ -147,8 +145,7 @@ export function mapMastraChunkToEvent(
 
 		return {
 			type: 'tool-result',
-			runId,
-			agentId,
+			...base,
 			payload: {
 				toolCallId,
 				result: payload.result,
@@ -282,8 +279,7 @@ export function mapMastraChunkToEvent(
 
 		return {
 			type: 'confirmation-request',
-			runId,
-			agentId,
+			...base,
 			payload: {
 				requestId,
 				toolCallId,
@@ -313,8 +309,7 @@ export function mapMastraChunkToEvent(
 		const errorInfo = extractErrorInfo(payload.error);
 		return {
 			type: 'error',
-			runId,
-			agentId,
+			...base,
 			payload: {
 				content: errorInfo.content,
 				...(errorInfo.statusCode !== undefined ? { statusCode: errorInfo.statusCode } : {}),
