@@ -116,6 +116,9 @@ function buildUpstreamMap(connections: Record<string, unknown>): Map<string, str
 // ---------------------------------------------------------------------------
 
 const SET_NODE_TYPE = 'n8n-nodes-base.set';
+const DATA_TABLE_NODE_TYPE = 'n8n-nodes-base.dataTable';
+/** DataTable system columns always present in row output. */
+const DATA_TABLE_SYSTEM_FIELDS = ['id', 'createdAt', 'updatedAt'];
 const AI_AGENT_TYPES = new Set([
 	'@n8n/n8n-nodes-langchain.agent',
 	'@n8n/n8n-nodes-langchain.openAi',
@@ -143,6 +146,21 @@ function getKnownOutputFields(node: WorkflowNodeResponse): Set<string> | undefin
 			);
 		}
 		return new Set();
+	}
+
+	// DataTable row operations: output includes user-defined columns + system columns
+	if (node.type === DATA_TABLE_NODE_TYPE) {
+		const params = node.parameters ?? {};
+		const operation = typeof params.operation === 'string' ? params.operation : '';
+
+		// Row insert/upsert/update return the row with all columns
+		if (['insert', 'upsert', 'update'].includes(operation)) {
+			const columns = params.columns as { value?: Record<string, unknown> } | undefined;
+			const userFields = columns?.value ? Object.keys(columns.value) : [];
+			return new Set([...userFields, ...DATA_TABLE_SYSTEM_FIELDS]);
+		}
+
+		// Row get also returns columns — fall through to schema discovery
 	}
 
 	// AI Agent nodes always output { output: string }
