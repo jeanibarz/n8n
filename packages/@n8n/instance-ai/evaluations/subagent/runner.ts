@@ -219,6 +219,7 @@ function toWorkflowResponse(captured: CapturedWorkflow): WorkflowResponse {
 		nodes: (json.nodes ?? []).map((n) => ({
 			name: n.name ?? '',
 			type: n.type,
+			typeVersion: n.typeVersion,
 			parameters: n.parameters as Record<string, unknown> | undefined,
 			disabled: (n as { disabled?: boolean }).disabled,
 			credentials: n.credentials as Record<string, unknown> | undefined,

@@ -11,6 +11,7 @@ import { validDataFlow } from './valid-data-flow';
 import { hasTrigger } from './has-trigger';
 import { noDisabledNodes } from './no-disabled-nodes';
 import { noEmptySetNodes } from './no-empty-set-nodes';
+import { validFieldReferences } from './valid-field-references';
 
 export const DETERMINISTIC_CHECKS: BinaryCheck[] = [
 	hasNodes,
@@ -19,6 +20,7 @@ export const DETERMINISTIC_CHECKS: BinaryCheck[] = [
 	noEmptySetNodes,
 	noDisabledNodes,
 	expressionsReferenceExistingNodes,
+	validFieldReferences,
 ];
 
 export const LLM_CHECKS: BinaryCheck[] = [fulfillsUserRequest, validDataFlow];
