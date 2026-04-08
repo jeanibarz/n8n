@@ -30,6 +30,7 @@ import { useRootStore } from '@n8n/stores/useRootStore';
 import { NodeHelpers, isResourceLocatorValue, type INodeProperties } from 'n8n-workflow';
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue';
 import { useInstanceAiStore } from '../instanceAi.store';
+import ConfirmationFooter from './ConfirmationFooter.vue';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -989,7 +990,7 @@ async function handleLater() {
 						</li>
 					</ul>
 				</div>
-				<footer :class="$style.footer">
+				<ConfirmationFooter layout="row-between">
 					<div :class="$style.footerNav">
 						<N8nLink
 							data-test-id="instance-ai-workflow-setup-review-details"
@@ -1018,7 +1019,7 @@ async function handleLater() {
 							@click="handleApply"
 						/>
 					</div>
-				</footer>
+				</ConfirmationFooter>
 			</div>
 			<div
 				v-else-if="currentCard"
@@ -1165,7 +1166,7 @@ async function handleLater() {
 				</div>
 
 				<!-- Footer -->
-				<footer :class="$style.footer">
+				<ConfirmationFooter layout="row-between">
 					<div :class="$style.footerNav">
 						<N8nButton
 							v-if="showArrows"
@@ -1225,7 +1226,7 @@ async function handleLater() {
 							@click="handleApply"
 						/>
 					</div>
-				</footer>
+				</ConfirmationFooter>
 			</div>
 		</template>
 
@@ -1348,14 +1349,6 @@ async function handleLater() {
 	background: var(--color--danger--tint-4);
 	border-radius: var(--radius);
 	margin: 0 var(--spacing--sm);
-}
-
-.footer {
-	display: flex;
-	align-items: center;
-	gap: var(--spacing--xs);
-	border-top: var(--border);
-	padding: var(--spacing--xs) var(--spacing--sm);
 }
 
 .footerNav {
