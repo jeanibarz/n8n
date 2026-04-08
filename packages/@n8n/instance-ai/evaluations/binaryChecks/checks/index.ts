@@ -7,6 +7,7 @@ import { allNodesConnected } from './all-nodes-connected';
 import { expressionsReferenceExistingNodes } from './expressions-reference-existing-nodes';
 import { fulfillsUserRequest } from './fulfills-user-request';
 import { hasNodes } from './has-nodes';
+import { validDataFlow } from './valid-data-flow';
 import { hasTrigger } from './has-trigger';
 import { noDisabledNodes } from './no-disabled-nodes';
 import { noEmptySetNodes } from './no-empty-set-nodes';
@@ -20,4 +21,4 @@ export const DETERMINISTIC_CHECKS: BinaryCheck[] = [
 	expressionsReferenceExistingNodes,
 ];
 
-export const LLM_CHECKS: BinaryCheck[] = [fulfillsUserRequest];
+export const LLM_CHECKS: BinaryCheck[] = [fulfillsUserRequest, validDataFlow];
