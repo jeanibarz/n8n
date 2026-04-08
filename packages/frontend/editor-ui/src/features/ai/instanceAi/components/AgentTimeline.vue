@@ -7,7 +7,7 @@ import type {
 import { N8nText } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 import { computed } from 'vue';
-import { extractArtifacts, type ArtifactInfo } from '../agentTimeline.utils';
+import { extractArtifacts, HIDDEN_TOOLS, type ArtifactInfo } from '../agentTimeline.utils';
 import { useInstanceAiStore } from '../instanceAi.store';
 import AgentSection from './AgentSection.vue';
 import AnsweredQuestions from './AnsweredQuestions.vue';
@@ -91,9 +91,6 @@ const timelineEntries = computed(() => props.visibleEntries ?? props.agentNode.t
 defineSlots<{
 	'after-tool-call'?: (props: { toolCall: InstanceAiToolCallState }) => unknown;
 }>();
-
-/** Tool calls that are internal bookkeeping and should not be shown to the user. */
-const HIDDEN_TOOLS = new Set(['updateWorkingMemory']);
 
 /** Index tool calls by ID for O(1) lookup and proper reactivity tracking. */
 const toolCallsById = computed(() => {
